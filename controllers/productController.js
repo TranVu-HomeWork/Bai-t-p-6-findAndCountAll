@@ -1,24 +1,92 @@
 const { Product, Category } = require('../models/associations');
+const { Op } = require('sequelize');
 
+// 1. GET /api/v1/products (Lấy danh sách sản phẩm với phân trang và lọc)
 exports.getAllProducts = async (req, res) => {
-  try {
-    const products = await Product.findAll({
-      include: [{ model: Category, attributes: ['id', 'name'] }]
+  try { const { page: pageQuery, limit: limitQuery, keyword, sort } = req.query;
+    const page = pageQuery === undefined ? 1 : Number(pageQuery);
+    const limit = limitQuery === undefined ? 10 : Number(limitQuery);
+
+    if (!Number.isInteger(page) || page <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_PAGE',
+          message: 'page phải là số nguyên lớn hơn 0.'
+        }
+      });
+    }
+
+    if (!Number.isInteger(limit) || limit <= 0 || limit > 50) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_LIMIT',
+          message: 'limit phải là số nguyên từ 1 đến 50.'
+        }
+      });
+    }
+
+    const where = {};
+
+    if (keyword && keyword.trim()) {
+      where.name = {
+        [Op.like]: `%${keyword.trim()}%`
+      };
+    }
+
+    let order = [['id', 'DESC']];
+
+    if (sort === 'price_asc') {
+      order = [['price', 'ASC']];
+    } else if (sort === 'price_desc') {
+      order = [['price', 'DESC']];
+    } else if (sort !== undefined) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_SORT',
+          message: 'sort chỉ nhận price_asc hoặc price_desc.'
+        }
+      });
+    }
+
+    const offset = (page - 1) * limit;
+
+    const { count, rows } = await Product.findAndCountAll({
+      where,
+      limit,
+      offset,
+      order,
+      distinct: true,
+      include: [{
+        model: Category,
+        attributes: ['id', 'name']
+      }]
     });
+
     return res.status(200).json({
       success: true,
-      data: products
+      data: rows,
+      meta: {
+        page,
+        limit,
+        total: count,
+        totalPages: Math.ceil(count / limit)
+      }
     });
   } catch (error) {
     return res.status(500).json({
       success: false,
       error: {
         code: 'INTERNAL_SERVER_ERROR',
-        message: 'Đã xảy ra lỗi khi lấy danh sách sản phẩm.'
+        message: 'Không thể lấy danh sách sản phẩm.'
       }
     });
   }
 };
+
+
 // 2. GET /api/v1/products/:id (Lấy sản phẩm theo ID)
 exports.getProductById = async (req, res) => {
   try {
